@@ -1,139 +1,177 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-<title>터치 로그라이크 : 생존 구역</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>모바일 러너 파티클 업그레이드</title>
 <style>
-html,body{margin:0;padding:0;overflow:hidden;background:#111;color:#fff;font-family:sans-serif}
-#game{position:relative;width:100vw;height:100vh;background:#222}
-.player,.enemy,.projectile,.skill{position:absolute;transform:translate(-50%,-50%)}
-.player{width:40px;height:40px;border-radius:8px;background:#4af}
-.enemy{width:40px;height:40px;background:#a33;border-radius:50%}
-#ui{position:fixed;top:10px;left:10px;z-index:10}
-#levelUp{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;justify-content:center;align-items:center;gap:20px;z-index:20}
-#levelUp button{width:220px;padding:15px;font-size:16px}
+body { margin:0; overflow:hidden; font-family:sans-serif; background:#87ceeb; }
+canvas { display:block; background:#87ceeb; }
+#ui { position:absolute; bottom:10px; width:100%; display:flex; justify-content:space-around; }
+.btn { width:80px; height:80px; border-radius:50%; background:rgba(0,0,0,0.5);
+  color:white; font-size:18px; text-align:center; line-height:80px; user-select:none; }
+#skins { position:absolute; top:10px; right:10px; display:flex; gap:10px; }
+.skinBtn { width:40px; height:40px; border-radius:50%; border:2px solid black; cursor:pointer; }
+.cooldown { position:absolute; top:60px; width:80px; height:10px; background:rgba(0,0,0,0.3); }
+.fill { height:100%; background:lime; }
 </style>
 </head>
 <body>
-<div id="game"></div>
-<div id="ui"></div>
-<div id="levelUp"></div>
+<canvas id="game"></canvas>
+<div id="ui">
+  <div class="btn" id="jumpBtn">점프</div>
+  <div class="btn" id="slideBtn">슬라이드</div>
+</div>
+<div id="skins">
+  <div class="skinBtn" style="background:red;" data-skin="red"></div>
+  <div class="skinBtn" style="background:blue;" data-skin="blue"></div>
+  <div class="skinBtn" style="background:green;" data-skin="green"></div>
+</div>
+<div style="position:absolute; bottom:100px; left:10px;">
+  <div>점프 부스터</div>
+  <div class="cooldown"><div id="jumpCD" class="fill"></div></div>
+  <div>슬라이드 무적</div>
+  <div class="cooldown"><div id="slideCD" class="fill"></div></div>
+</div>
+
+<audio id="jumpSound"><source src="https://actions.google.com/sounds/v1/foley/swish.ogg" type="audio/ogg"></audio>
+<audio id="slideSound"><source src="https://actions.google.com/sounds/v1/foley/metal_slide.ogg" type="audio/ogg"></audio>
+
 <script>
-const game=document.getElementById('game');
-const levelUpUI=document.getElementById('levelUp');
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
 
-const player={
-  class:'warrior', // warrior, soldier, mage
-  weapon:'katana',
-  x:window.innerWidth/2,
-  y:window.innerHeight/2,
-  stats:{hp:120,maxHp:120,damage:10,atkSpeed:1},
-  lastAttack:0,
-  skills:[]
-};
-
-const playerEl=document.createElement('div');
-playerEl.className='player';
-game.appendChild(playerEl);
-
-const enemies=[];
-const projectiles=[];
-
-const skillDefs={
-  warrior:{
-    katana:[
-      {name:'초승달 베기',cd:3000,cast:()=>slash(80,1.5)},
-      {name:'질풍참',cd:6000,cast:()=>slash(120,2)}
-    ],
-    axe:[
-      {name:'회전 도끼',cd:4000,cast:()=>aoe(90,1.8)},
-      {name:'대지 분쇄',cd:7000,cast:()=>aoe(140,2.5)}
-    ],
-    greatsword:[
-      {name:'중력 참격',cd:5000,cast:()=>slash(150,3)}
-    ]
-  },
-  soldier:{
-    pistol:[
-      {name:'쌍권총 연사',cd:3000,cast:()=>shoot(3,6)}
-    ],
-    rifle:[
-      {name:'돌격사격',cd:5000,cast:()=>shoot(6,8)}
-    ],
-    sniper:[
-      {name:'관통 저격',cd:6000,cast:()=>shoot(1,20,true)}
-    ]
-  },
-  mage:{
-    fire:[
-      {name:'화염구',cd:3000,cast:()=>shoot(1,10,false,'orange')}
-    ],
-    ice:[
-      {name:'빙결파',cd:5000,cast:()=>aoe(100,1.5,'#7af')}
-    ],
-    lightning:[
-      {name:'연쇄 번개',cd:6000,cast:()=>chain()}
-    ]
-  }
-};
-
-function slash(range,mult){
-  enemies.forEach(e=>{
-    const d=Math.hypot(e.x-player.x,e.y-player.y);
-    if(d<range) e.hp-=player.stats.damage*mult;
-  });
-}
-function aoe(range,mult,color='#fa0'){
-  enemies.forEach(e=>{
-    const d=Math.hypot(e.x-player.x,e.y-player.y);
-    if(d<range) e.hp-=player.stats.damage*mult;
-  });
-}
-function shoot(count,speed,pierce=false,color='#ff0'){
-  for(let i=0;i<count;i++){
-    projectiles.push({x:player.x,y:player.y,dx:Math.cos(i)*speed,dy:Math.sin(i)*speed,damage:player.stats.damage,pierce,color});
+function resizeCanvas(){
+  if(window.innerWidth > window.innerHeight){
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+  } else {
+    canvas.width = window.innerHeight; canvas.height = window.innerWidth;
   }
 }
-function chain(){
-  let last=null;
-  enemies.slice(0,3).forEach(e=>{if(last)e.hp-=player.stats.damage*1.5;last=e;});
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+let player = {x:100, y:canvas.height-150, width:50, height:50, vy:0, jumping:false, sliding:false, skin:"red"};
+let gravity=1, obstacles=[], coins=[], distance=0, speed=5, score=0;
+let jumpSkillReady=true, slideSkillReady=true;
+let jumpCD=document.getElementById("jumpCD"), slideCD=document.getElementById("slideCD");
+let effects=[], particles=[];
+
+// 스킨 선택
+document.querySelectorAll(".skinBtn").forEach(btn=>{
+  btn.addEventListener("click",()=>{ player.skin = btn.dataset.skin; });
+});
+
+// 사운드
+const jumpSound = document.getElementById("jumpSound");
+const slideSound = document.getElementById("slideSound");
+
+// 터치
+document.getElementById("jumpBtn").addEventListener("touchstart", jump);
+document.getElementById("slideBtn").addEventListener("touchstart", slide);
+
+function jump(){
+  if(!player.jumping && !player.sliding){ player.vy=-18; player.jumping=true; }
+  else if(jumpSkillReady){
+    player.vy=-30; player.jumping=true; jumpSkillReady=false; jumpSound.play();
+    spawnJumpParticles();
+    let start=Date.now();
+    let interval=setInterval(()=>{
+      let elapsed=Date.now()-start;
+      jumpCD.style.width=Math.min(elapsed/10000*100,100)+"%";
+      if(elapsed>=10000){ jumpSkillReady=true; clearInterval(interval); jumpCD.style.width="100%"; }
+    },50);
+  }
 }
 
-function autoAttack(){
-  const now=Date.now();
-  if(now-player.lastAttack<1000/player.stats.atkSpeed) return;
-  player.lastAttack=now;
-  if(enemies[0]) enemies[0].hp-=player.stats.damage;
+function slide(){
+  if(!player.jumping){
+    player.sliding=true;
+    let duration=500;
+    if(slideSkillReady){ duration=1000; slideSkillReady=false; slideSound.play(); spawnSlideParticles(); 
+      let start=Date.now(); let interval=setInterval(()=>{
+        let elapsed=Date.now()-start;
+        slideCD.style.width=Math.min(elapsed/10000*100,100)+"%";
+        if(elapsed>=10000){ slideSkillReady=true; clearInterval(interval); slideCD.style.width="100%"; }
+      },50);
+    }
+    setTimeout(()=>player.sliding=false, duration);
+  }
 }
 
-function spawnEnemy(){
-  enemies.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,hp:30});
+// 장애물 & 코인
+function spawnObstacle(){ let h=Math.random()<0.5?50:150; obstacles.push({x:canvas.width,y:canvas.height-150-(h-50),width:50,height:h}); }
+function spawnCoin(){ let y=Math.random()<0.5?canvas.height-200:canvas.height-300; coins.push({x:canvas.width,y:y,width:30,height:30}); }
+setInterval(spawnObstacle,2000); setInterval(spawnCoin,1500);
+
+// 파티클
+function spawnJumpParticles(){
+  for(let i=0;i<20;i++){
+    particles.push({x:player.x+25, y:player.y+50, vx:(Math.random()-0.5)*5, vy:-Math.random()*5-2, life:30, color:"orange"});
+  }
+}
+function spawnSlideParticles(){
+  for(let i=0;i<20;i++){
+    let angle=Math.random()*Math.PI*2;
+    particles.push({x:player.x+25, y:player.y+25, vx:Math.cos(angle)*2, vy:Math.sin(angle)*2, life:40, color:"rgba(0,255,255,0.5)"});
+  }
+}
+function drawParticles(){
+  for(let i=particles.length-1;i>=0;i--){
+    let p=particles[i];
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y,5,5);
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.2; p.life--;
+    if(p.life<=0) particles.splice(i,1);
+  }
 }
 
-function update(){
-  autoAttack();
-  enemies.forEach((e,i)=>{if(e.hp<=0) enemies.splice(i,1);});
-  projectiles.forEach(p=>{p.x+=p.dx;p.y+=p.dy;});
-  render();
-  requestAnimationFrame(update);
+// 게임 루프
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#87ceeb"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#228B22"; ctx.fillRect(0,canvas.height-100,canvas.width,100);
+
+  // 플레이어
+  player.vy+=gravity; player.y+=player.vy;
+  if(player.y>canvas.height-150){ player.y=canvas.height-150; player.vy=0; player.jumping=false; }
+  ctx.fillStyle=player.skin;
+  if(player.sliding) ctx.fillRect(player.x,player.y+25,player.width,player.height-25);
+  else ctx.fillRect(player.x,player.y,player.width,player.height);
+
+  // 파티클
+  drawParticles();
+
+  // 장애물
+  ctx.fillStyle="brown";
+  for(let i=obstacles.length-1;i>=0;i--){
+    let ob=obstacles[i]; ob.x-=speed;
+    ctx.fillRect(ob.x,ob.y,ob.width,ob.height);
+    let px=player.x, py=player.y, pw=player.width, ph=player.sliding?player.height-25:player.height;
+    let ox=ob.x, oy=ob.y, ow=ob.width, oh=ob.height;
+    if(px<ox+ow && px+pw>ox && py<oy+oh && py+ph>oy){
+      if(player.sliding && !slideSkillReady) continue;
+      alert("게임 종료! 점수: "+score);
+      document.location.reload();
+    }
+    if(ob.x+ob.width<0) obstacles.splice(i,1);
+  }
+
+  // 코인
+  ctx.fillStyle="yellow";
+  for(let i=coins.length-1;i>=0;i--){
+    let c=coins[i]; c.x-=speed; ctx.fillRect(c.x,c.y,c.width,c.height);
+    let px=player.x, py=player.y, pw=player.width, ph=player.sliding?player.height-25:player.height;
+    if(px<c.x+c.width && px+pw>c.x && py<c.y+c.height && py+ph>c.y){ score+=10; coins.splice(i,1); continue; }
+    if(c.x+c.width<0) coins.splice(i,1);
+  }
+
+  ctx.fillStyle="black"; ctx.font="30px Arial"; ctx.fillText("점수: "+score,20,50);
+  distance+=speed; score=Math.floor(distance/10);
+  requestAnimationFrame(gameLoop);
 }
 
-function render(){
-  playerEl.style.left=player.x+'px';
-  playerEl.style.top=player.y+'px';
-  document.querySelectorAll('.enemy,.projectile').forEach(el=>el.remove());
-  enemies.forEach(e=>{
-    const el=document.createElement('div');
-    el.className='enemy';
-    el.style.left=e.x+'px';
-    el.style.top=e.y+'px';
-    game.appendChild(el);
-  });
-}
-
-setInterval(spawnEnemy,2000);
-update();
+gameLoop();
 </script>
 </body>
 </html>
