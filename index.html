@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini Dot Galaga</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      font-family: Arial, sans-serif;
+    }
+    canvas {
+      image-rendering: pixelated;
+      border: 2px solid #444;
+      background: #000;
+      touch-action: none;
+    }
+    #info {
+      position: fixed;
+      bottom: 10px;
+      color: #aaa;
+      font-size: 12px;
+      text-align: center;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="240" height="320"></canvas>
+  <div id="info">터치 또는 ← → 로 이동 / 자동 발사</div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const SCALE = 1;
+    let left = false;
+    let right = false;
+
+    const player = {
+      x: 120,
+      y: 280,
+      w: 7,
+      h: 7
+    };
+
+    let bullets = [];
+    let enemies = [];
+    let score = 0;
+    let gameOver = false;
+
+    function spawnEnemy() {
+      enemies.push({
+        x: Math.random() * 220 + 10,
+        y: -10,
+        w: 7,
+        h: 7,
+        speed: Math.random() * 0.5 + 0.5
+      });
+    }
+
+    setInterval(spawnEnemy, 800);
+    setInterval(() => {
+      bullets.push({ x: player.x + 3, y: player.y, speed: 3 });
+    }, 300);
+
+    function update() {
+      if (gameOver) return;
+
+      if (left) player.x -= 2;
+      if (right) player.x += 2;
+
+      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+
+      bullets.forEach(b => b.y -= b.speed);
+      bullets = bullets.filter(b => b.y > -10);
+
+      enemies.forEach(e => e.y += e.speed);
+
+      enemies.forEach(e => {
+        if (
+          e.x < player.x + player.w &&
+          e.x + e.w > player.x &&
+          e.y < player.y + player.h &&
+          e.y + e.h > player.y
+        ) {
+          gameOver = true;
+        }
+      });
+
+      bullets.forEach((b, bi) => {
+        enemies.forEach((e, ei) => {
+          if (
+            b.x < e.x + e.w &&
+            b.x + 2 > e.x &&
+            b.y < e.y + e.h &&
+            b.y + 4 > e.y
+          ) {
+            bullets.splice(bi, 1);
+            enemies.splice(ei, 1);
+            score += 10;
+          }
+        });
+      });
+    }
+
+    function drawPixel(x, y, w, h, color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, w, h);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawPixel(player.x, player.y, player.w, player.h, '#0f0');
+
+      bullets.forEach(b => drawPixel(b.x, b.y, 2, 4, '#ff0'));
+      enemies.forEach(e => drawPixel(e.x, e.y, e.w, e.h, '#f00'));
+
+      ctx.fillStyle = '#fff';
+      ctx.fillText('SCORE: ' + score, 5, 10);
+
+      if (gameOver) {
+        ctx.fillStyle = '#fff';
+        ctx.fillText('GAME OVER', 80, 160);
+        ctx.fillText('새로고침하면 재시작', 60, 180);
+      }
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') left = true;
+      if (e.key === 'ArrowRight') right = true;
+    });
+
+    window.addEventListener('keyup', e => {
+      if (e.key === 'ArrowLeft') left = false;
+      if (e.key === 'ArrowRight') right = false;
+    });
+
+    canvas.addEventListener('touchstart', e => {
+      const x = e.touches[0].clientX;
+      if (x < window.innerWidth / 2) left = true;
+      else right = true;
+    });
+
+    canvas.addEventListener('touchend', () => {
+      left = false;
+      right = false;
+    });
+  </script>
+</body>
+</html>
