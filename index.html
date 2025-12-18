@@ -2,170 +2,137 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<title>Glass Orchard Mobile</title>
+<title>Glass Orchard — DODGE EXTREME</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 <style>
-  html,body{margin:0;padding:0;background:#05070c;color:#e6e6eb;touch-action:none;font-family:system-ui}
-  canvas{display:block;margin:0 auto;background:#070a12}
-  #hud{position:fixed;left:0;top:0;width:100%;display:flex;justify-content:space-between;gap:6px;padding:6px;z-index:10}
-  .chip{background:rgba(20,28,60,.7);border:1px solid #2a356d;border-radius:10px;padding:6px 10px;font-size:12px}
-  #overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.75);z-index:20}
-  #panel{background:#0e1533;border-radius:16px;padding:18px;width:86%;max-width:360px;text-align:center}
-  button{background:#1a2455;color:#fff;border:1px solid #3344aa;border-radius:10px;padding:10px 14px;margin-top:10px}
+html,body{margin:0;padding:0;background:#05070c;color:#e6e6eb;font-family:system-ui;touch-action:none}
+canvas{display:block;margin:0 auto;background:#070a12}
+#hud{position:fixed;top:0;left:0;width:100%;display:flex;justify-content:space-between;padding:6px;z-index:5}
+.chip{background:rgba(20,30,70,.7);border-radius:10px;padding:6px 10px;font-size:12px}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:10}
+#panel{background:#0f163a;border-radius:16px;padding:20px;width:88%;max-width:380px;text-align:center}
+button{background:#23318c;border:1px solid #3a4bdc;color:#fff;border-radius:12px;padding:10px 16px;margin-top:10px}
 </style>
 </head>
 <body>
-<div id="hud">
-  <div class="chip" id="hp"></div>
-  <div class="chip" id="stage"></div>
-  <div class="chip" id="score"></div>
-</div>
-<canvas id="c" width="360" height="640"></canvas>
-<div id="overlay">
-  <div id="panel">
-    <h2 id="endTitle"></h2>
-    <p id="endText"></p>
-    <button onclick="restart()">다시하기</button>
+  <!-- Intro Story Overlay -->
+  <div id="intro" style="position:fixed; inset:0; background:#0b0b0f; color:#e6e6f0; z-index:10; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:20px; text-align:center;">
+    <h1 style="margin-bottom:16px;">🌿 Glass Orchard</h1>
+    <p style="max-width:480px; line-height:1.6; font-size:15px;">
+      유리로 된 씨앗들이 떨어지는 세계.<br/>
+      이곳에서는 공격할 수 없다.<br/>
+      살아남는 자만이 정원의 진실을 본다.<br/><br/>
+      너는 단 하나의 씨앗.<br/>
+      파편을 피해, 끝까지 버텨라.
+    </p>
+    <div style="margin-top:24px; display:flex; gap:12px;">
+      <button onclick="startGame()" style="padding:10px 18px; font-size:14px;">▶ 시작</button>
+      <button onclick="skipIntro()" style="padding:10px 18px; font-size:14px; opacity:0.7;">SKIP</button>
+    </div>
   </div>
-</div>
-<script>
-/* =====================================================
-   GLASS ORCHARD — MOBILE EXPANDED EDITION
-   - 모바일 터치 조작
-   - BGM / SFX
-   - 보스 페이즈 전환
-   - 성장 트리 (씨앗 진화)
-   - 스테이지 분기 & 엔딩
-===================================================== */
 
-const canvas=document.getElementById('c');
-const ctx=canvas.getContext('2d');
-const W=canvas.width,H=canvas.height;
+  <canvas id="game"></canvas>
 
-// ------------------ Audio (웹 오디오 API)
-const AudioCtx=window.AudioContext||window.webkitAudioContext;
-const audio=new AudioCtx();
-function tone(freq,dur=0.1,vol=0.2){
-  const o=audio.createOscillator();
-  const g=audio.createGain();
-  o.frequency.value=freq;o.type='sine';
-  g.gain.value=vol;
-  o.connect(g);g.connect(audio.destination);
-  o.start();o.stop(audio.currentTime+dur);
-}
+  <script>
+    const intro = document.getElementById('intro');
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
 
-// ------------------ Touch Input
-let touch={x:W/2,y:H*0.8,active:false};
-canvas.addEventListener('touchstart',e=>{audio.resume();touch.active=true;updateTouch(e)});
-canvas.addEventListener('touchmove',e=>updateTouch(e));
-canvas.addEventListener('touchend',()=>touch.active=false);
-function updateTouch(e){const r=canvas.getBoundingClientRect();const t=e.touches[0];touch.x=(t.clientX-r.left)*(W/r.width);touch.y=(t.clientY-r.top)*(H/r.height)}
-
-// ------------------ Utils
-const rnd=(a,b)=>Math.random()*(b-a)+a;
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-
-// ------------------ Game State
-let score=0,stage=1,phase=1,ending="";
-let bullets=[],enemies=[],particles=[];
-
-const hudHP=document.getElementById('hp');
-const hudStage=document.getElementById('stage');
-const hudScore=document.getElementById('score');
-
-class Player{
-  constructor(){this.x=W/2;this.y=H-80;this.hp=6;this.cool=0;this.evo=0}
-  update(){
-    if(touch.active){this.x+=(touch.x-this.x)*0.15;this.y+=(touch.y-this.y)*0.15}
-    this.x=clamp(this.x,20,W-20);this.y=clamp(this.y,20,H-20);
-    if(this.cool<=0){shoot(this.x,this.y,-Math.PI/2);this.cool=10-this.evo*2}
-    this.cool--;
-  }
-  draw(){ctx.fillStyle=['#7cf2c2','#9bb0ff','#ffd166'][this.evo];ctx.fillRect(this.x-6,this.y-6,12,12)}
-}
-
-class Enemy{
-  constructor(type,x,y){this.type=type;this.x=x;this.y=y;this.hp=type==='boss'?60:3;this.t=0}
-  update(){this.t++;
-    if(this.type==='mob'){this.y+=1.2;if(this.t%60===0)ring(this.x,this.y,4,2)}
-    if(this.type==='boss'){
-      if(this.hp>40){ if(this.t%50===0)ring(this.x,this.y,8,2.5) }
-      else if(this.hp>20){ if(this.t%35===0)spiral(this.x,this.y,10,3) }
-      else{ if(this.t%20===0){ring(this.x,this.y,12,3.5);spiral(this.x,this.y,6,2)} }
+    function resize() {
+      canvas.width = 390;
+      canvas.height = 720;
     }
-  }
-  draw(){ctx.fillStyle=this.type==='boss'?'#ff7a7a':'#cfa56a';ctx.fillRect(this.x-12,this.y-12,24,24)}
-}
+    resize();
 
-class Bullet{
-  constructor(x,y,vx,vy){this.x=x;this.y=y;this.vx=vx;this.vy=vy;this.life=120}
-  update(){this.x+=this.vx;this.y+=this.vy;this.life--}
-  draw(){ctx.fillStyle='#eafff4';ctx.fillRect(this.x-2,this.y-2,4,4)}
-}
+    let gameStarted = false;
 
-function shoot(x,y,a){tone(880,0.05,0.05);bullets.push(new Bullet(x,y,Math.cos(a)*5,Math.sin(a)*5))}
-function ring(x,y,n,s){for(let i=0;i<n;i++)bullets.push(new Bullet(x,y,Math.cos(i*2*Math.PI/n)*s,Math.sin(i*2*Math.PI/n)*s))}
-function spiral(x,y,n,s){for(let i=0;i<n;i++)bullets.push(new Bullet(x,y,Math.cos(i*2*Math.PI/n+time*0.1)*s,Math.sin(i*2*Math.PI/n+time*0.1)*s))}
-
-const player=new Player();
-let time=0;
-
-function spawn(){ if(stage<3) enemies.push(new Enemy('mob',rnd(40,W-40),-20)); }
-
-function collide(a,b,r=12){return (a.x-b.x)**2+(a.y-b.y)**2<r*r}
-
-function update(){time++;
-  if(time%60===0 && enemies.length<5)spawn();
-  player.update();
-  enemies.forEach(e=>e.update());
-  bullets.forEach(b=>b.update());
-
-  for(let i=enemies.length-1;i>=0;i--){
-    const e=enemies[i];
-    if(collide(player,e)){player.hp--;tone(120,0.2,0.2);enemies.splice(i,1)}
-    for(let j=bullets.length-1;j>=0;j--){
-      const b=bullets[j];
-      if(collide(b,e,16)){e.hp--;bullets.splice(j,1);if(e.hp<=0){score+=100; if(e.type==='boss'){advanceStage()} enemies.splice(i,1)}break}
+    function startGame() {
+      intro.style.display = 'none';
+      gameStarted = true;
+      initGame();
+      requestAnimationFrame(loop);
     }
+
+    function skipIntro() {
+      startGame();
+    }
+
+    // === 게임 로직 확장 ===
+
+let endingsUnlocked = JSON.parse(localStorage.getItem('endings')||'{}');
+let currentEnding = null;
+
+const endingTexts = {
+  fail: {
+    title:'❌ 파편 엔딩',
+    text:'유리는 부서졌고, 씨앗은 뿌리내리지 못했다.
+정원은 아직 너를 받아들이지 않는다.'
+  },
+  seed: {
+    title:'🌱 씨앗 엔딩',
+    text:'작은 씨앗 하나가 남았다.
+아직 연약하지만, 가능성은 존재한다.'
+  },
+  true: {
+    title:'👑 유리 정원 엔딩',
+    text:'너는 끝까지 버텼다.
+정원은 너를 선택했고, 유리는 더 이상 적이 아니다.'
   }
+};
 
-  bullets=bullets.filter(b=>b.life>0&&b.y>-20&&b.y<H+20);
+function showEnding(type){
+  currentEnding = type;
+  endingsUnlocked[type] = true;
+  localStorage.setItem('endings',JSON.stringify(endingsUnlocked));
 
-  if(player.hp<=0)gameOver(false);
+  let overlay = document.createElement('div');
+  overlay.style.position='fixed';overlay.style.inset=0;
+  overlay.style.background='#050508';overlay.style.color='#fff';
+  overlay.style.zIndex=20;overlay.style.display='flex';
+  overlay.style.flexDirection='column';overlay.style.justifyContent='center';
+  overlay.style.alignItems='center';overlay.style.padding='20px';
+
+  let h=document.createElement('h2');h.innerText=endingTexts[type].title;
+  let p=document.createElement('p');p.style.whiteSpace='pre-line';
+  p.style.maxWidth='480px';p.style.lineHeight='1.6';
+
+  overlay.appendChild(h);overlay.appendChild(p);
+
+  let btn=document.createElement('button');
+  btn.innerText='다시하기';btn.style.marginTop='20px';
+  btn.onclick=()=>location.reload();
+
+  let unlock=document.createElement('div');
+  unlock.style.marginTop='16px';unlock.style.fontSize='13px';
+  unlock.innerText='해금 현황: '+Object.keys(endingsUnlocked).join(', ');
+
+  overlay.appendChild(btn);
+  overlay.appendChild(unlock);
+  document.body.appendChild(overlay);
+
+  typeWriter(p, endingTexts[type].text);
 }
 
-function draw(){
-  ctx.fillStyle='#070a12';ctx.fillRect(0,0,W,H);
-  bullets.forEach(b=>b.draw());
-  enemies.forEach(e=>e.draw());
-  player.draw();
+function typeWriter(el,text){
+  el.innerText='';let i=0;
+  let t=setInterval(()=>{
+    el.innerText+=text[i++];
+    if(i>=text.length) clearInterval(t);
+  },40);
 }
 
-function loop(){update();draw();
-  hudHP.textContent='HP '+'❤'.repeat(player.hp);
-  hudStage.textContent='Stage '+stage;
-  hudScore.textContent='Score '+score;
-  if(!ended)requestAnimationFrame(loop);
+// === 도트 일러스트 ===
+function drawSeed(x,y){
+  ctx.fillStyle='#9cff57';ctx.fillRect(x-2,y-2,4,4);
+  ctx.fillStyle='#3a8f2d';ctx.fillRect(x-1,y-1,2,2);
 }
 
-let ended=false;
-function advanceStage(){
-  stage++;
-  player.evo=Math.min(2,player.evo+1); // 성장 트리 단순화
-  if(stage===3){enemies.push(new Enemy('boss',W/2,120))}
-  if(stage>3)gameOver(true);
+// === 사망 처리 예시 ===
+function gameOver(time){
+  if(time<30) showEnding('fail');
+  else if(time<60) showEnding('seed');
+  else showEnding('true');
 }
 
-function gameOver(clear){
-  ended=true;
-  document.getElementById('overlay').style.display='flex';
-  document.getElementById('endTitle').textContent=clear?'엔딩: 유리 과수원 해방':'패배';
-  document.getElementById('endText').textContent=clear?'씨앗은 새로운 숲이 된다.':'과수원에 다시 묻혔다.';
-}
+// 기존 loop 안에서 drawSeed(player.x,player.y) 호출
 
-function restart(){location.reload()}
-
-loop();
-</script>
-</body>
-</html>
