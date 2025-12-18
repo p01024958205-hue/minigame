@@ -2,164 +2,88 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Mini Dot Galaga</title>
+  <title>Mini Galaga Classic</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
-    body {
-      margin: 0;
-      background: #000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      font-family: Arial, sans-serif;
-    }
-    canvas {
-      image-rendering: pixelated;
-      border: 2px solid #444;
-      background: #000;
-      touch-action: none;
-    }
-    #info {
-      position: fixed;
-      bottom: 10px;
-      color: #aaa;
-      font-size: 12px;
-      text-align: center;
-      width: 100%;
-    }
+    body{margin:0;background:#000;display:flex;justify-content:center;align-items:center;height:100vh;font-family:Arial;color:#fff}
+    canvas{image-rendering:pixelated;border:2px solid #333;background:#000;touch-action:none}
+    #ui{position:fixed;top:6px;width:100%;text-align:center;font-size:12px;color:#0f0}
+    #hint{position:fixed;bottom:6px;width:100%;text-align:center;font-size:11px;color:#aaa}
   </style>
 </head>
 <body>
-  <canvas id="game" width="240" height="320"></canvas>
-  <div id="info">터치 또는 ← → 로 이동 / 자동 발사</div>
+<canvas id="game" width="240" height="320"></canvas>
+<div id="ui"></div>
+<div id="hint">드래그 이동 / 자동 발사</div>
+<script>
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const ui=document.getElementById('ui');
 
-  <script>
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
+/* ===== 상태 ===== */
+let score=0, high=localStorage.getItem('galaga_hs')||0;
+let lives=3, round=1, gameOver=false;
 
-    const SCALE = 1;
-    let left = false;
-    let right = false;
+/* ===== 플레이어 (비행기 도트 스프라이트) ===== */
+const player={x:120,y:270,s:2};
+const ship=[[0,1,0],[1,1,1],[0,1,0]];
 
-    const player = {
-      x: 120,
-      y: 280,
-      w: 7,
-      h: 7
-    };
+/* ===== 입력 ===== */
+let dirX=0,dirY=0,start=null;
+canvas.addEventListener('touchstart',e=>{start={x:e.touches[0].clientX,y:e.touches[0].clientY}});
+canvas.addEventListener('touchmove',e=>{if(!start)return;let dx=e.touches[0].clientX-start.x;let dy=e.touches[0].clientY-start.y;let l=Math.hypot(dx,dy)||1;dirX=dx/l;dirY=dy/l});
+canvas.addEventListener('touchend',()=>{dirX=dirY=0;start=null});
 
-    let bullets = [];
-    let enemies = [];
-    let score = 0;
-    let gameOver = false;
+/* ===== 엔티티 ===== */
+let bullets=[], enemies=[];
+setInterval(()=>{if(!gameOver)bullets.push({x:player.x,y:player.y})},350);
 
-    function spawnEnemy() {
-      enemies.push({
-        x: Math.random() * 220 + 10,
-        y: -10,
-        w: 7,
-        h: 7,
-        speed: Math.random() * 0.5 + 0.5
-      });
-    }
+/* ===== 적 편대 (천천히 내려오며 쌓임) ===== */
+function spawnFormation(){
+  for(let r=0;r<2;r++)for(let c=0;c<8;c++)enemies.push({x:40+c*20,y:30+r*16,dx:0.4});
+}
 
-    setInterval(spawnEnemy, 800);
-    setInterval(() => {
-      bullets.push({ x: player.x + 3, y: player.y, speed: 3 });
-    }, 300);
+/* ===== 업데이트 ===== */
+function update(){
+  if(gameOver)return;
+  player.x+=dirX*player.s; player.y+=dirY*player.s;
+  player.x=Math.max(10,Math.min(230,player.x)); player.y=Math.max(200,Math.min(300,player.y));
 
-    function update() {
-      if (gameOver) return;
+  bullets.forEach(b=>b.y-=4); bullets=bullets.filter(b=>b.y>-10);
 
-      if (left) player.x -= 2;
-      if (right) player.x += 2;
+  let edge=false;
+  enemies.forEach(e=>{e.x+=e.dx;if(e.x<20||e.x>220)edge=true});
+  if(edge)enemies.forEach(e=>{e.dx*=-1;e.y+=10});
 
-      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+  bullets.forEach((b,bi)=>{
+    enemies.forEach((e,ei)=>{
+      if(Math.abs(b.x-e.x)<6&&Math.abs(b.y-e.y)<6){bullets.splice(bi,1);enemies.splice(ei,1);score+=10}
+    })
+  });
 
-      bullets.forEach(b => b.y -= b.speed);
-      bullets = bullets.filter(b => b.y > -10);
+  enemies.forEach(e=>{if(Math.abs(e.x-player.x)<8&&Math.abs(e.y-player.y)<8){lose()}});
 
-      enemies.forEach(e => e.y += e.speed);
+  if(enemies.length===0){round++; if(round>10)end(true); else spawnFormation()}
+}
 
-      enemies.forEach(e => {
-        if (
-          e.x < player.x + player.w &&
-          e.x + e.w > player.x &&
-          e.y < player.y + player.h &&
-          e.y + e.h > player.y
-        ) {
-          gameOver = true;
-        }
-      });
+function lose(){lives--; if(lives<=0)end(false)}
+function end(win){gameOver=true; if(score>high){high=score;localStorage.setItem('galaga_hs',score)}}
 
-      bullets.forEach((b, bi) => {
-        enemies.forEach((e, ei) => {
-          if (
-            b.x < e.x + e.w &&
-            b.x + 2 > e.x &&
-            b.y < e.y + e.h &&
-            b.y + 4 > e.y
-          ) {
-            bullets.splice(bi, 1);
-            enemies.splice(ei, 1);
-            score += 10;
-          }
-        });
-      });
-    }
+/* ===== 렌더 ===== */
+function px(x,y,c){ctx.fillStyle=c;ctx.fillRect(x,y,3,3)}
+function drawShip(x,y,c){ship.forEach((r,i)=>r.forEach((v,j)=>{if(v)px(x+j*3-3,y+i*3,c)}))}
 
-    function drawPixel(x, y, w, h, color) {
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y, w, h);
-    }
+function draw(){
+  ctx.clearRect(0,0,240,320);
+  drawShip(player.x,player.y,'#0f0');
+  bullets.forEach(b=>px(b.x,b.y,'#ff0'));
+  enemies.forEach(e=>drawShip(e.x,e.y,'#f00'));
+  ui.innerText=`ROUND ${round}  LIFE ${lives}  SCORE ${score}  HI ${high}`;
+  if(gameOver){ctx.fillStyle='#fff';ctx.fillText('GAME OVER',80,160)}
+}
 
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      drawPixel(player.x, player.y, player.w, player.h, '#0f0');
-
-      bullets.forEach(b => drawPixel(b.x, b.y, 2, 4, '#ff0'));
-      enemies.forEach(e => drawPixel(e.x, e.y, e.w, e.h, '#f00'));
-
-      ctx.fillStyle = '#fff';
-      ctx.fillText('SCORE: ' + score, 5, 10);
-
-      if (gameOver) {
-        ctx.fillStyle = '#fff';
-        ctx.fillText('GAME OVER', 80, 160);
-        ctx.fillText('새로고침하면 재시작', 60, 180);
-      }
-    }
-
-    function loop() {
-      update();
-      draw();
-      requestAnimationFrame(loop);
-    }
-
-    loop();
-
-    window.addEventListener('keydown', e => {
-      if (e.key === 'ArrowLeft') left = true;
-      if (e.key === 'ArrowRight') right = true;
-    });
-
-    window.addEventListener('keyup', e => {
-      if (e.key === 'ArrowLeft') left = false;
-      if (e.key === 'ArrowRight') right = false;
-    });
-
-    canvas.addEventListener('touchstart', e => {
-      const x = e.touches[0].clientX;
-      if (x < window.innerWidth / 2) left = true;
-      else right = true;
-    });
-
-    canvas.addEventListener('touchend', () => {
-      left = false;
-      right = false;
-    });
-  </script>
+function loop(){update();draw();requestAnimationFrame(loop)}
+spawnFormation(); loop();
+</script>
 </body>
 </html>
