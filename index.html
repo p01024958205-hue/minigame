@@ -2,204 +2,138 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 <title>터치 로그라이크 : 생존 구역</title>
 <style>
-  html, body { margin:0; padding:0; background:#111; color:#fff; overflow:hidden; touch-action:none; }
-  canvas { display:block; background:#141414; }
-  #ui { position:fixed; inset:0; pointer-events:none; }
-  .hud { position:absolute; left:12px; top:10px; font-size:14px; }
-  .bar { width:200px; height:10px; background:#333; border-radius:6px; overflow:hidden; margin-top:6px; }
-  .fill { height:100%; background:#5cf; }
-  .hp { background:#e55; }
-  .btns { position:absolute; right:12px; bottom:12px; display:flex; gap:10px; pointer-events:auto; }
-  .btn { width:64px; height:64px; border-radius:16px; background:#333; display:flex; align-items:center; justify-content:center; font-size:11px; text-align:center; }
-  .btn:active { transform:scale(0.95); }
-  #overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); display:flex; align-items:center; justify-content:center; }
-  .panel { background:#222; border-radius:16px; padding:16px; width:min(94vw,760px); }
-  .row { display:flex; gap:10px; flex-wrap:wrap; }
-  .card { flex:1; min-width:170px; background:#2b2b2b; border-radius:12px; padding:12px; }
-  .card h3 { margin:0 0 6px; }
-  .opt { background:#3a3a3a; padding:8px; border-radius:10px; margin:6px 0; cursor:pointer; }
-  .opt:hover { background:#4a4a4a; }
-  .title { font-size:20px; margin-bottom:10px; }
-  .center { text-align:center; }
+html,body{margin:0;padding:0;overflow:hidden;background:#111;color:#fff;font-family:sans-serif}
+#game{position:relative;width:100vw;height:100vh;background:#222}
+.player,.enemy,.projectile,.skill{position:absolute;transform:translate(-50%,-50%)}
+.player{width:40px;height:40px;border-radius:8px;background:#4af}
+.enemy{width:40px;height:40px;background:#a33;border-radius:50%}
+#ui{position:fixed;top:10px;left:10px;z-index:10}
+#levelUp{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;justify-content:center;align-items:center;gap:20px;z-index:20}
+#levelUp button{width:220px;padding:15px;font-size:16px}
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="ui">
-  <div class="hud">
-    <div>HP</div>
-    <div class="bar"><div id="hpFill" class="fill hp" style="width:100%"></div></div>
-    <div style="margin-top:8px">EXP</div>
-    <div class="bar"><div id="xpFill" class="fill" style="width:0%"></div></div>
-    <div style="margin-top:8px">LV <span id="lv">1</span> | TIME <span id="time">0.0</span>s</div>
-  </div>
-  <div class="btns">
-    <div class="btn" id="skill1">폭발</div>
-    <div class="btn" id="skill2">미사일</div>
-    <div class="btn" id="skill3">대쉬</div>
-  </div>
-</div>
-
-<div id="overlay"><div class="panel" id="menu"></div></div>
-
+<div id="game"></div>
+<div id="ui"></div>
+<div id="levelUp"></div>
 <script>
-// ===== Canvas =====
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-function resize(){ canvas.width = innerWidth; canvas.height = innerHeight; }
-addEventListener('resize', resize); resize();
+const game=document.getElementById('game');
+const levelUpUI=document.getElementById('levelUp');
 
-// ===== State =====
-let state = 'menu';
-let time = 0;
-let enemies = [];
-let bullets = [];
-let boss = null;
-
-// ===== Player =====
-const player = {
-  x: canvas.width/2, y: canvas.height/2, r: 16,
-  maxHP: 100, hp: 100,
-  atk: 10, fireRate: 0.6, range: 220, proj: 1,
-  speed: 2.6, lastShot: 0,
-  lv: 1, xp: 0, xpNeed: 10,
-  cls: null, weapon: null, element: null,
-  permAtk: Number(localStorage.getItem('permAtk')||0)
+const player={
+  class:'warrior', // warrior, soldier, mage
+  weapon:'katana',
+  x:window.innerWidth/2,
+  y:window.innerHeight/2,
+  stats:{hp:120,maxHp:120,damage:10,atkSpeed:1},
+  lastAttack:0,
+  skills:[]
 };
-player.atk += player.permAtk;
 
-// ===== Touch Move =====
-let touchDir = null;
-addEventListener('pointerdown', e=>{ touchDir = {x:e.clientX, y:e.clientY}; });
-addEventListener('pointermove', e=>{ if(touchDir) touchDir = {x:e.clientX, y:e.clientY}; });
-addEventListener('pointerup', ()=> touchDir=null);
+const playerEl=document.createElement('div');
+playerEl.className='player';
+game.appendChild(playerEl);
 
-// ===== UI =====
-const overlay = document.getElementById('overlay');
-const menu = document.getElementById('menu');
-const hpFill = document.getElementById('hpFill');
-const xpFill = document.getElementById('xpFill');
-const timeEl = document.getElementById('time');
-const lvEl = document.getElementById('lv');
+const enemies=[];
+const projectiles=[];
 
-// ===== Menu =====
-function showMenu(){
-  overlay.style.display='flex';
-  menu.innerHTML = `
-  <div class="title center">터치 로그라이크 : 생존 구역</div>
-  <div class="center" style="margin-bottom:8px">마왕 <b>민근영</b>을 처치하라</div>
-  <div class="center" style="margin-bottom:10px">영구 공격력 보너스 : +${player.permAtk}</div>
-  <div class="row">
-    <div class="card"><h3>전사 (근접)</h3>
-      <div class="opt" onclick="pick('warrior','katana')">일본도 (부채꼴 베기)</div>
-      <div class="opt" onclick="pick('warrior','axe')">도끼 (광역)</div>
-      <div class="opt" onclick="pick('warrior','spear')">창 (관통)</div>
-      <div class="opt" onclick="pick('warrior','shield')">방패 (넉백)</div>
-    </div>
-    <div class="card"><h3>군인 (원거리)</h3>
-      <div class="opt" onclick="pick('soldier','dual')">쌍권총 (다중)</div>
-      <div class="opt" onclick="pick('soldier','rifle')">돌격소총 (연사)</div>
-      <div class="opt" onclick="pick('soldier','crossbow')">석궁 (고정 피해)</div>
-      <div class="opt" onclick="pick('soldier','sniper')">저격총 (관통+고뎀)</div>
-    </div>
-    <div class="card"><h3>마법사</h3>
-      <div class="opt" onclick="pick('mage','fire')">불 (도트)</div>
-      <div class="opt" onclick="pick('mage','water')">물 (감속)</div>
-      <div class="opt" onclick="pick('mage','electric')">전기 (체인)</div>
-      <div class="opt" onclick="pick('mage','nature')">풀 (흡혈)</div>
-    </div>
-  </div>`;
-}
-window.pick = (cls, w)=>{
-  player.cls = cls; player.weapon = w; player.element = w;
-  if(cls==='warrior'){ player.atk=16+player.permAtk; player.range=90; player.fireRate=0.8; }
-  if(cls==='soldier'){ player.atk=12+player.permAtk; player.range=340; player.fireRate=0.35; }
-  if(cls==='mage'){ player.atk=14+player.permAtk; player.range=280; player.fireRate=0.55; }
-  overlay.style.display='none'; state='play';
+const skillDefs={
+  warrior:{
+    katana:[
+      {name:'초승달 베기',cd:3000,cast:()=>slash(80,1.5)},
+      {name:'질풍참',cd:6000,cast:()=>slash(120,2)}
+    ],
+    axe:[
+      {name:'회전 도끼',cd:4000,cast:()=>aoe(90,1.8)},
+      {name:'대지 분쇄',cd:7000,cast:()=>aoe(140,2.5)}
+    ],
+    greatsword:[
+      {name:'중력 참격',cd:5000,cast:()=>slash(150,3)}
+    ]
+  },
+  soldier:{
+    pistol:[
+      {name:'쌍권총 연사',cd:3000,cast:()=>shoot(3,6)}
+    ],
+    rifle:[
+      {name:'돌격사격',cd:5000,cast:()=>shoot(6,8)}
+    ],
+    sniper:[
+      {name:'관통 저격',cd:6000,cast:()=>shoot(1,20,true)}
+    ]
+  },
+  mage:{
+    fire:[
+      {name:'화염구',cd:3000,cast:()=>shoot(1,10,false,'orange')}
+    ],
+    ice:[
+      {name:'빙결파',cd:5000,cast:()=>aoe(100,1.5,'#7af')}
+    ],
+    lightning:[
+      {name:'연쇄 번개',cd:6000,cast:()=>chain()}
+    ]
+  }
 };
-showMenu();
 
-// ===== Level Up =====
-function levelUp(){ state='level'; overlay.style.display='flex'; player.xp=0; player.xpNeed+=5; player.lv++; lvEl.textContent=player.lv;
-  const opts = [
-    ()=>{player.atk+=3}, ()=>{player.fireRate=Math.max(0.2, player.fireRate-0.05)}, ()=>{player.proj++}, ()=>{player.range+=40}, ()=>{player.maxHP+=20; player.hp+=20}
-  ].sort(()=>Math.random()-0.5).slice(0,3);
-  menu.innerHTML = `<div class='title center'>레벨 업</div>` + opts.map((_,i)=>
-    `<div class='opt' onclick='choose(${i})'>업그레이드 선택 ${i+1}</div>`).join('');
-  window.choose=i=>{ opts[i](); overlay.style.display='none'; state='play'; };
+function slash(range,mult){
+  enemies.forEach(e=>{
+    const d=Math.hypot(e.x-player.x,e.y-player.y);
+    if(d<range) e.hp-=player.stats.damage*mult;
+  });
 }
-
-// ===== Enemies =====
-function spawnEnemy(){
-  const side = Math.random()*4|0;
-  let x,y; if(side===0){x=0;y=Math.random()*canvas.height}
-  if(side===1){x=canvas.width;y=Math.random()*canvas.height}
-  if(side===2){x=Math.random()*canvas.width;y=0}
-  if(side===3){x=Math.random()*canvas.width;y=canvas.height}
-  enemies.push({x,y,r:14,hp:20+time*0.6,spd:1.2+time*0.01});
+function aoe(range,mult,color='#fa0'){
+  enemies.forEach(e=>{
+    const d=Math.hypot(e.x-player.x,e.y-player.y);
+    if(d<range) e.hp-=player.stats.damage*mult;
+  });
 }
-function spawnBoss(){ boss={x:canvas.width/2,y:120,r:64,hp:1200,name:'민근영'}; }
-
-// ===== Shooting (Weapon Traits) =====
-function autoShoot(){
-  if(time-player.lastShot < player.fireRate) return;
-  let target=null,dmin=1e9; for(const e of enemies){const d=Math.hypot(e.x-player.x,e.y-player.y); if(d<dmin){dmin=d; target=e;}}
-  if(boss){const d=Math.hypot(boss.x-player.x,boss.y-player.y); if(d<dmin){dmin=d; target=boss;}}
-  if(!target||dmin>player.range) return; player.lastShot=time;
-  let count=player.proj + (player.weapon==='dual'?1:0);
+function shoot(count,speed,pierce=false,color='#ff0'){
   for(let i=0;i<count;i++){
-    const spread=(i-(count-1)/2)*0.15;
-    const a=Math.atan2(target.y-player.y,target.x-player.x)+spread;
-    bullets.push({x:player.x,y:player.y,vx:Math.cos(a)*6,vy:Math.sin(a)*6,dmg:player.atk,pen: player.weapon==='spear'||player.weapon==='sniper'});
+    projectiles.push({x:player.x,y:player.y,dx:Math.cos(i)*speed,dy:Math.sin(i)*speed,damage:player.stats.damage,pierce,color});
   }
 }
-
-// ===== Skills =====
-function aoe(){ enemies.forEach(e=>e.hp-=30); if(boss) boss.hp-=50; }
-function missiles(){ for(let i=0;i<6;i++) bullets.push({x:player.x,y:player.y,vx:(Math.random()*2-1)*5,vy:(Math.random()*2-1)*5,dmg:18}); }
-function dash(){ player.x+= (Math.random()*2-1)*160; player.y+= (Math.random()*2-1)*160; }
-document.getElementById('skill1').onclick=aoe;
-document.getElementById('skill2').onclick=missiles;
-document.getElementById('skill3').onclick=dash;
-
-// ===== Loop =====
-let last=0; function loop(t){ requestAnimationFrame(loop); const dt=(t-last)/1000; last=t; if(state!=='play') return;
-  time+=dt; timeEl.textContent=time.toFixed(1);
-  if(Math.random()<0.03) spawnEnemy(); if(time>25&&!boss) spawnBoss();
-  if(touchDir){ const dx=touchDir.x-player.x, dy=touchDir.y-player.y; const d=Math.hypot(dx,dy)||1; player.x+=dx/d*player.speed; player.y+=dy/d*player.speed; }
-  autoShoot();
-  for(const e of enemies){ const a=Math.atan2(player.y-e.y,player.x-e.x); e.x+=Math.cos(a)*e.spd; e.y+=Math.sin(a)*e.spd; if(Math.hypot(e.x-player.x,e.y-player.y)<e.r+player.r){ player.hp-=20*dt; }}
-  if(boss){ const a=Math.atan2(player.y-boss.y,player.x-boss.x); boss.x+=Math.cos(a)*0.6; boss.y+=Math.sin(a)*0.6; if(boss.hp<=0){ state='win'; overlay.style.display='flex'; localStorage.setItem('permAtk', player.permAtk+1); menu.innerHTML='<div class="title center">민근영 처치 성공<br/>영구 공격력 +1</div>'; }}
-  bullets.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; enemies.forEach(e=>{ if(Math.hypot(e.x-b.x,e.y-b.y)<e.r){ e.hp-=b.dmg; if(!b.pen) b.dead=true; }}); if(boss&&Math.hypot(boss.x-b.x,boss.y-b.y)<boss.r){ boss.hp-=b.dmg; if(!b.pen) b.dead=true; }});
-  bullets=bullets.filter(b=>!b.dead && b.x>0&&b.x<canvas.width&&b.y>0&&b.y<canvas.height);
-  enemies=enemies.filter(e=>e.hp>0);
-  player.xp+=dt; if(player.xp>=player.xpNeed) levelUp();
-  hpFill.style.width=(player.hp/player.maxHP*100)+'%'; xpFill.style.width=(player.xp/player.xpNeed*100)+'%';
-  draw();
+function chain(){
+  let last=null;
+  enemies.slice(0,3).forEach(e=>{if(last)e.hp-=player.stats.damage*1.5;last=e;});
 }
-requestAnimationFrame(loop);
 
-// ===== Draw =====
-function draw(){ ctx.clearRect(0,0,canvas.width,canvas.height);
-  // player visuals per class
-  ctx.fillStyle= player.cls==='warrior'?'#6cf':player.cls==='soldier'?'#fc6':'#c6f';
-  ctx.beginPath(); ctx.arc(player.x,player.y,player.r,0,Math.PI*2); ctx.fill();
-  // weapon icon
-  ctx.fillStyle='#fff'; ctx.fillRect(player.x+10,player.y-4,8,4);
-  // bullets
-  ctx.fillStyle='#ffd'; bullets.forEach(b=>ctx.fillRect(b.x-2,b.y-2,4,4));
-  // enemies
-  ctx.fillStyle='#f66'; enemies.forEach(e=>{ ctx.beginPath(); ctx.arc(e.x,e.y,e.r,0,Math.PI*2); ctx.fill(); });
-  // boss ugly creature
-  if(boss){ ctx.fillStyle='#7f3'; ctx.beginPath(); ctx.arc(boss.x,boss.y,boss.r,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#000'; ctx.fillRect(boss.x-34,boss.y-12,14,14); ctx.fillRect(boss.x+20,boss.y-12,14,14);
-    ctx.strokeStyle='#000'; ctx.beginPath(); ctx.arc(boss.x,boss.y+16,22,0,Math.PI); ctx.stroke();
-    ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.fillText('민근영', boss.x, boss.y-boss.r-8);
-  }
+function autoAttack(){
+  const now=Date.now();
+  if(now-player.lastAttack<1000/player.stats.atkSpeed) return;
+  player.lastAttack=now;
+  if(enemies[0]) enemies[0].hp-=player.stats.damage;
 }
+
+function spawnEnemy(){
+  enemies.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,hp:30});
+}
+
+function update(){
+  autoAttack();
+  enemies.forEach((e,i)=>{if(e.hp<=0) enemies.splice(i,1);});
+  projectiles.forEach(p=>{p.x+=p.dx;p.y+=p.dy;});
+  render();
+  requestAnimationFrame(update);
+}
+
+function render(){
+  playerEl.style.left=player.x+'px';
+  playerEl.style.top=player.y+'px';
+  document.querySelectorAll('.enemy,.projectile').forEach(el=>el.remove());
+  enemies.forEach(e=>{
+    const el=document.createElement('div');
+    el.className='enemy';
+    el.style.left=e.x+'px';
+    el.style.top=e.y+'px';
+    game.appendChild(el);
+  });
+}
+
+setInterval(spawnEnemy,2000);
+update();
 </script>
 </body>
 </html>
