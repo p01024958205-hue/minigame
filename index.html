@@ -1,210 +1,294 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8" />
-<title>Glass Orchard — DODGE EXTREME</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<meta charset="UTF-8">
+<title>Dungeon Origin : ROOT</title>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.js"></script>
 <style>
-html,body{margin:0;padding:0;background:#05070c;color:#e6e6eb;font-family:system-ui;touch-action:none}
-canvas{display:block;margin:0 auto;background:#070a12}
-#hud{position:fixed;top:0;left:0;width:100%;display:flex;justify-content:space-between;padding:6px;z-index:5}
-.chip{background:rgba(20,30,70,.7);border-radius:10px;padding:6px 10px;font-size:12px}
-#overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:10}
-#panel{background:#0f163a;border-radius:16px;padding:20px;width:88%;max-width:380px;text-align:center}
-button{background:#23318c;border:1px solid #3a4bdc;color:#fff;border-radius:12px;padding:10px 16px;margin-top:10px}
+body { margin:0; background:black; touch-action:none; }
 </style>
 </head>
 <body>
-  <!-- Intro Story Overlay -->
-  <div id="intro" style="position:fixed; inset:0; background:#0b0b0f; color:#e6e6f0; z-index:10; overflow:hidden;">
-  <div id="storyScroll" style="position:absolute; bottom:-100%; width:100%; padding:32px 24px; box-sizing:border-box; text-align:center;">
-    <h1 style="margin-bottom:24px;">🌿 Glass Orchard</h1>
-    <p id="introText" style="max-width:520px; margin:0 auto; line-height:1.8; font-size:15px; white-space:pre-line;"></p>
-  </div>
 
-  <button onclick="skipIntro()" style="position:absolute; top:16px; right:16px; padding:8px 14px; font-size:13px; opacity:0.75;">SKIP</button>
-</div>
-  </div>
+<script>
+/* =====================================================
+   GLOBAL DATA
+===================================================== */
+const ROOM_FLOW = [
+  ...Array(8).fill({type:'NORMAL'}),
+  {type:'TREASURE'},
+  {type:'ELITE'},
+  ...Array(6).fill({type:'NORMAL'}),
+  {type:'MINI_BOSS'},
+  ...Array(10).fill({type:'NORMAL'}),
+  {type:'BOSS'}
+];
 
-  <canvas id="game"></canvas>
-
-  <script>
-    const intro = document.getElementById('intro');
-
-// 인트로 문구 분기
-const unlocked = JSON.parse(localStorage.getItem('endings')||'{}');
-let introStory = `유리는 하늘에서 떨어졌다.
-
-처음에는 비처럼 보였다.
-반짝이고, 아름답고, 조용히.
-
-그러나 그것은 비가 아니었다.
-
-이 세계에서 살아남는 법은 단 하나.
-맞지 않는 것.`;
-
-if(unlocked.seed){
-  introStory += `
-
-씨앗은 기억한다.`;
-}
-if(unlocked.true){
-  introStory += `
-
-정원은 너를 알고 있다.`;
-}
-if(unlocked.hidden){
-  introStory += `
-
-유리는 더 이상 적이 아니다.`;
-}
-
-document.getElementById('introText').innerText = introStory;
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-
-    function resize() {
-      canvas.width = 390;
-      canvas.height = 720;
-    }
-    resize();
-
-    let gameStarted = false;
-
-// 인트로 자동 스크롤 + 종료 감지
-let scrollY = -window.innerHeight;
-let introFinished = false;
-function scrollStory(){
-  const story = document.getElementById('storyScroll');
-  scrollY += 0.25;
-  story.style.bottom = scrollY + 'px';
-
-  // 도트 일러스트 등장
-  if(scrollY > -200) drawIntroSeed();
-
-  if(scrollY < 80) {
-    requestAnimationFrame(scrollStory);
-  } else if(!introFinished) {
-    introFinished = true;
-    fadeOutIntro();
-  }
-}
-scrollStory();
-
-function fadeOutIntro(){
-  let opacity = 1;
-  const fade = setInterval(()=>{
-    opacity -= 0.02;
-    intro.style.opacity = opacity;
-    if(opacity <= 0){
-      clearInterval(fade);
-      startGame();
-    }
-  },30);
-}
-
-function drawIntroSeed(){
-  const seed = document.createElement('div');
-  seed.style.position='absolute';
-  seed.style.left='50%';
-  seed.style.top='60%';
-  seed.style.width='8px';
-  seed.style.height='8px';
-  seed.style.background='#9cff57';
-  seed.style.transform='translate(-50%,-50%)';
-  seed.style.boxShadow='0 0 8px #9cff57';
-  intro.appendChild(seed);
-}
-
-
-    function startGame() {
-  intro.style.display = 'none';
-  gameStarted = true;
-  initGame();
-  requestAnimationFrame(loop);
-}
-
-    function skipIntro() {
-      startGame();
-    }
-
-    // === 게임 로직 확장 ===
-
-let endingsUnlocked = JSON.parse(localStorage.getItem('endings')||'{}');
-let currentEnding = null;
-
-const endingTexts = {
-  fail: {
-    title:'❌ 파편 엔딩',
-    text:'유리는 부서졌고, 씨앗은 뿌리내리지 못했다.
-정원은 아직 너를 받아들이지 않는다.'
-  },
-  seed: {
-    title:'🌱 씨앗 엔딩',
-    text:'작은 씨앗 하나가 남았다.
-아직 연약하지만, 가능성은 존재한다.'
-  },
-  true: {
-    title:'👑 유리 정원 엔딩',
-    text:'너는 끝까지 버텼다.
-정원은 너를 선택했고, 유리는 더 이상 적이 아니다.'
-  }
+const WEAPONS = {
+  일반:[
+    {name:'녹슨 검',color:0xffffff,dmg:6,skills:[]},
+    {name:'짧은 도끼',color:0xffffff,dmg:7,skills:[]},
+    {name:'목검',color:0xffffff,dmg:5,skills:[]},
+    {name:'낡은 창',color:0xffffff,dmg:6,skills:[]},
+    {name:'돌망치',color:0xffffff,dmg:8,skills:[]}
+  ],
+  희귀:[
+    {name:'푸른 검',color:0x4fc3f7,dmg:12,
+     skills:[{mp:20,action:(s)=>s.flash(0x4fc3f7)}]},
+    {name:'빙결 도끼',color:0x4fc3f7,dmg:13,
+     skills:[{mp:20,action:(s)=>s.freezeEnemies()}]}
+  ],
+  에픽:[
+    {name:'어둠의 검',color:0xba68c8,dmg:20,
+     skills:[
+      {mp:20,action:(s)=>s.darkSlash()},
+      {mp:30,action:(s)=>s.darkWave()}
+     ]}
+  ],
+  전설:[
+    {name:'태양의 대검',color:0xffca28,dmg:32,
+     skills:[
+      {mp:30,action:(s)=>s.fireSpin()},
+      {mp:50,action:(s)=>s.sunCrash()}
+     ]}
+  ],
+  근본:[
+    {name:'태초의 균열검',color:0xff3d00,dmg:60,
+     skills:[
+      {mp:30,action:(s)=>s.rootWave()},
+      {mp:70,action:(s)=>s.worldBreak()}
+     ]}
+  ]
 };
 
-function showEnding(type){
-  currentEnding = type;
-  endingsUnlocked[type] = true;
-  localStorage.setItem('endings',JSON.stringify(endingsUnlocked));
+let ROOM_INDEX = 0;
 
-  let overlay = document.createElement('div');
-  overlay.style.position='fixed';overlay.style.inset=0;
-  overlay.style.background='#050508';overlay.style.color='#fff';
-  overlay.style.zIndex=20;overlay.style.display='flex';
-  overlay.style.flexDirection='column';overlay.style.justifyContent='center';
-  overlay.style.alignItems='center';overlay.style.padding='20px';
-
-  let h=document.createElement('h2');h.innerText=endingTexts[type].title;
-  let p=document.createElement('p');p.style.whiteSpace='pre-line';
-  p.style.maxWidth='480px';p.style.lineHeight='1.6';
-
-  overlay.appendChild(h);overlay.appendChild(p);
-
-  let btn=document.createElement('button');
-  btn.innerText='다시하기';btn.style.marginTop='20px';
-  btn.onclick=()=>location.reload();
-
-  let unlock=document.createElement('div');
-  unlock.style.marginTop='16px';unlock.style.fontSize='13px';
-  unlock.innerText='해금 현황: '+Object.keys(endingsUnlocked).join(', ');
-
-  overlay.appendChild(btn);
-  overlay.appendChild(unlock);
-  document.body.appendChild(overlay);
-
-  typeWriter(p, endingTexts[type].text);
+/* =====================================================
+   INTRO SCENE
+===================================================== */
+class IntroScene extends Phaser.Scene {
+  constructor(){ super('Intro'); }
+  create(){
+    this.add.text(180,300,'Dungeon Origin',{
+      fontSize:'30px',color:'#fff'
+    }).setOrigin(0.5);
+    this.add.text(180,340,'ROOT',{
+      fontSize:'18px',color:'#ff3d00'
+    }).setOrigin(0.5);
+    this.time.delayedCall(2500,()=>this.scene.start('Game'));
+  }
 }
 
-function typeWriter(el,text){
-  el.innerText='';let i=0;
-  let t=setInterval(()=>{
-    el.innerText+=text[i++];
-    if(i>=text.length) clearInterval(t);
-  },40);
+/* =====================================================
+   GAME SCENE
+===================================================== */
+class GameScene extends Phaser.Scene {
+  constructor(){ super('Game'); }
+
+  create(){
+    this.player=this.physics.add.sprite(180,320)
+      .setSize(26,38).setTint(0x00ff99);
+    this.player.hp=100;
+    this.player.mp=50;
+    this.player.weapon=WEAPONS.일반[0];
+
+    this.hpBar=this.add.rectangle(90,18,160,10,0xff4444);
+    this.mpBar=this.add.rectangle(90,34,160,8,0x448aff);
+
+    this.move={u:0,d:0,l:0,r:0};
+    this.createControls();
+
+    this.monsters=this.physics.add.group();
+    this.bossGroup=this.physics.add.group();
+
+    this.loadRoom();
+
+    this.physics.add.overlap(this.player,this.monsters,this.hitEnemy,null,this);
+    this.physics.add.overlap(this.player,this.bossGroup,this.hitBoss,null,this);
+  }
+
+  createControls(){
+    const btn=(x,y,t,cb)=>{
+      let b=this.add.text(x,y,t,{fontSize:'20px',backgroundColor:'#333'})
+        .setOrigin(0.5).setInteractive();
+      b.on('pointerdown',()=>cb(1));
+      b.on('pointerup',()=>cb(0));
+    };
+    btn(60,520,'↑',v=>this.move.u=v);
+    btn(60,580,'↓',v=>this.move.d=v);
+    btn(20,550,'←',v=>this.move.l=v);
+    btn(100,550,'→',v=>this.move.r=v);
+
+    this.add.text(280,530,'SKILL1',{fontSize:'14px',backgroundColor:'#555'})
+      .setInteractive().on('pointerdown',()=>this.useSkill(0));
+    this.add.text(280,570,'SKILL2',{fontSize:'14px',backgroundColor:'#777'})
+      .setInteractive().on('pointerdown',()=>this.useSkill(1));
+  }
+
+  loadRoom(){
+    this.monsters.clear(true,true);
+    this.bossGroup.clear(true,true);
+
+    let room=ROOM_FLOW[ROOM_INDEX];
+    if(room.type==='BOSS') return this.spawnBoss();
+    if(room.type==='MINI_BOSS') return this.spawnMiniBoss();
+    if(room.type==='TREASURE') return this.spawnChest();
+
+    let count=room.type==='ELITE'?3:5;
+    for(let i=0;i<count;i++){
+      let m=this.monsters.create(
+        Phaser.Math.Between(40,320),
+        Phaser.Math.Between(80,480)
+      );
+      m.hp=30+ROOM_INDEX*5;
+    }
+  }
+
+  spawnBoss(){
+    let b=this.bossGroup.create(180,200)
+      .setTint(0xff0000).setScale(2);
+    b.hp=600;
+    b.phase=1;
+    this.boss=b;
+  }
+
+  spawnMiniBoss(){
+    let b=this.bossGroup.create(180,200)
+      .setTint(0xff9800).setScale(1.5);
+    b.hp=300;
+    b.phase=1;
+  }
+
+  hitEnemy(p,m){
+    m.hp-=this.player.weapon.dmg*0.03;
+    p.hp-=0.05;
+    if(m.hp<=0){
+      this.dropWeapon(m.x,m.y);
+      m.destroy();
+      if(this.monsters.countActive()===0) this.spawnKey();
+    }
+  }
+
+  hitBoss(p,b){
+    p.hp-=0.15;
+    b.hp-=this.player.weapon.dmg*0.04;
+    if(b.hp<400) b.phase=2;
+    if(b.hp<200) b.phase=3;
+    this.bossAI(b);
+    if(b.hp<=0){ b.destroy(); this.spawnKey(); }
+  }
+
+  bossAI(b){
+    let sp=[60,120,200][b.phase-1];
+    this.physics.moveToObject(b,this.player,sp);
+    if(b.phase===3) this.flash(0xff1744);
+  }
+
+  spawnKey(){
+    let k=this.add.rectangle(180,320,14,14,0xffeb3b)
+      .setInteractive();
+    k.on('pointerdown',()=>{
+      k.destroy();
+      this.spawnPortal();
+    });
+  }
+
+  spawnPortal(){
+    let p=this.add.rectangle(180,200,30,30,0x00e5ff)
+      .setInteractive();
+    p.on('pointerdown',()=>{
+      ROOM_INDEX++;
+      this.loadRoom();
+      p.destroy();
+    });
+  }
+
+  spawnChest(){
+    let c=this.add.rectangle(180,300,26,20,0x795548)
+      .setInteractive();
+    c.on('pointerdown',()=>{
+      this.dropWeapon(c.x,c.y,true);
+      this.spawnPortal();
+      c.destroy();
+    });
+  }
+
+  dropWeapon(x,y,high=false){
+    let grades=Object.keys(WEAPONS);
+    let g=grades[Phaser.Math.Between(high?1:0,grades.length-1)];
+    let wData=Phaser.Utils.Array.GetRandom(WEAPONS[g]);
+    let w=this.add.rectangle(x,y,16,16,wData.color)
+      .setInteractive();
+    w.on('pointerdown',()=>{
+      this.player.weapon=wData;
+      w.destroy();
+    });
+  }
+
+  useSkill(i){
+    let s=this.player.weapon.skills?.[i];
+    if(!s||this.player.mp<s.mp) return;
+    this.player.mp-=s.mp;
+    s.action(this);
+  }
+
+  /* ====== SKILL EFFECTS ====== */
+  darkSlash(){ this.flash(0x000000); }
+  darkWave(){ this.monsters.children.iterate(m=>m&& (m.hp-=40)); }
+  fireSpin(){ this.flash(0xff5722); }
+  sunCrash(){ this.monsters.children.iterate(m=>m&&(m.hp-=80)); }
+  rootWave(){ this.flash(0xff3d00); }
+  worldBreak(){
+    this.flash(0xff0000);
+    this.monsters.children.iterate(m=>m&&(m.hp=0));
+    if(this.boss) this.boss.hp-=200;
+  }
+  freezeEnemies(){ this.flash(0x4fc3f7); }
+
+  flash(color){
+    let r=this.add.rectangle(180,320,360,640,color).setAlpha(0.3);
+    this.tweens.add({targets:r,alpha:0,duration:300,onComplete:()=>r.destroy()});
+  }
+
+  update(){
+    let s=120;
+    this.player.setVelocity(
+      (this.move.r-this.move.l)*s,
+      (this.move.d-this.move.u)*s
+    );
+    this.hpBar.width=Math.max(0,this.player.hp*1.6);
+    this.mpBar.width=Math.max(0,this.player.mp*3.2);
+    if(this.player.hp<=0) this.scene.start('GameOver');
+  }
 }
 
-// === 도트 일러스트 ===
-function drawSeed(x,y){
-  ctx.fillStyle='#9cff57';ctx.fillRect(x-2,y-2,4,4);
-  ctx.fillStyle='#3a8f2d';ctx.fillRect(x-1,y-1,2,2);
+/* =====================================================
+   GAME OVER
+===================================================== */
+class GameOverScene extends Phaser.Scene{
+  constructor(){super('GameOver');}
+  create(){
+    this.add.text(180,300,'YOU DIED',{fontSize:'32px',color:'#ff4444'})
+      .setOrigin(0.5);
+    this.add.text(180,360,'RETRY',{fontSize:'20px',backgroundColor:'#333'})
+      .setOrigin(0.5).setInteractive()
+      .on('pointerdown',()=>{
+        ROOM_INDEX=0;
+        this.scene.start('Game');
+      });
+  }
 }
 
-// === 사망 처리 예시 ===
-function gameOver(time){
-  if(dodgePerfect && time>60) showEnding('hidden');
-  else if(time<30) showEnding('fail');
-  else if(time<60) showEnding('seed');
-  else showEnding('true');
-}
-
-// 기존 loop 안에서 drawSeed(player.x,player.y) 호출
-
+/* =====================================================
+   CONFIG
+===================================================== */
+new Phaser.Game({
+  type:Phaser.AUTO,
+  width:360,
+  height:640,
+  physics:{default:'arcade',arcade:{debug:false}},
+  scene:[IntroScene,GameScene,GameOverScene]
+});
+</script>
+</body>
+</html>
